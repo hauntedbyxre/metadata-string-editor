@@ -93,3 +93,8 @@ export interface EditRequest {
   index: number;
   newValue: string;
 }
+
+export interface EditProject {
+  fileName: string;
+  edits: EditAction[];
+}
