@@ -1,7 +1,7 @@
 from __future__ import annotations
 import uuid
 import time
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from fastapi.responses import Response, JSONResponse
 
 from ..models.metadata import (
@@ -161,8 +161,8 @@ async def import_project(session_id: str, project: EditProject):
     return {"applied": len(project.edits)}
 
 
-@router.post("/download/{session_id}")
-async def download(session_id: str):
+@router.api_route("/download/{session_id}", methods=["GET", "POST"])
+async def download(session_id: str, request: Request = None):
     session = _sessions.get(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
