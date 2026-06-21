@@ -8,11 +8,12 @@ import StringTable from '../components/StringTable';
 import SearchBar from '../components/SearchBar';
 import BulkReplace from '../components/BulkReplace';
 import ActivityLog from '../components/ActivityLog';
+import Credits from '../components/Credits';
 import ThemeToggle from '../components/ThemeToggle';
 
 const PAGE_SIZE = 500;
 
-type View = 'editor' | 'info' | 'bulk' | 'history';
+type View = 'editor' | 'info' | 'bulk' | 'history' | 'credits';
 
 export default function Home({ theme, setTheme }: { theme: string; setTheme: (t: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -215,6 +216,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-12 border-b border-[var(--border)] flex items-center px-4 gap-3 bg-[var(--bg-secondary)]">
+          <span className="text-xs text-[var(--text-muted)] mr-1">Made by XRE</span>
           <span className="text-sm font-medium text-[var(--text-primary)] truncate">
             {file?.name}
           </span>
@@ -275,6 +277,8 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
             <ActivityLog actions={history} />
           </div>
         )}
+
+        {view === 'credits' && <Credits />}
 
         {view === 'editor' && (
           <div className="flex-1 flex flex-col min-h-0">

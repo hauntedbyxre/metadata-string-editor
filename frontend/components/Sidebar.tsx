@@ -1,6 +1,6 @@
-import { FileText, Search, Info, Replace, History, Undo2, Download, Upload, Plus } from 'lucide-react';
+import { FileText, Search, Info, Replace, History, Undo2, Download, Upload, Plus, Heart } from 'lucide-react';
 
-type View = 'editor' | 'info' | 'bulk' | 'history';
+type View = 'editor' | 'info' | 'bulk' | 'history' | 'credits';
 
 interface Props {
   view: View;
@@ -18,6 +18,7 @@ const navItems: { id: View; label: string; icon: any }[] = [
   { id: 'info', label: 'Metadata Info', icon: Info },
   { id: 'bulk', label: 'Bulk Replace', icon: Replace },
   { id: 'history', label: 'Activity Log', icon: History },
+  { id: 'credits', label: 'Credits', icon: Heart },
 ];
 
 export default function Sidebar({ view, onViewChange, hasMetadata, onUndo, canUndo, onExport, onImport, onNew }: Props) {

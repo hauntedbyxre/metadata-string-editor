@@ -17,7 +17,7 @@ router = APIRouter()
 
 _sessions: dict[str, dict] = {}
 _MAX_SESSIONS = 10
-_SESSION_TTL = 1800  # 30 minutes
+_SESSION_TTL = 600  # 10 minutes
 
 
 def _cleanup_sessions():

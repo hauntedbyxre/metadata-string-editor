@@ -42,6 +42,7 @@ export default function UploadZone({ onUpload, loading }: Props) {
           <p className="text-[var(--text-muted)] text-sm mt-1">or click to browse</p>
         </>
       )}
+      <p className="text-[var(--text-muted)] text-xs mt-6 text-center">Made by XRE</p>
     </div>
   );
 }
