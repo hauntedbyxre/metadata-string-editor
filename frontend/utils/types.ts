@@ -62,7 +62,11 @@ export interface StringEntry {
 export interface StringLiteralEntry {
   index: number;
   value: string;
+  offset: number;
+  length: number;
 }
+
+export type ViewMode = 'literals' | 'strings';
 
 export interface MetadataFileInfo {
   fileName: string;

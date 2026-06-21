@@ -32,13 +32,18 @@ export async function fetchStrings(sessionId: string, offset: number, limit: num
   return request(`/api/strings/${sessionId}?offset=${offset}&limit=${limit}`);
 }
 
-export async function fetchStringLiterals(sessionId: string, offset: number, limit: number): Promise<{ total: number; offset: number; limit: number; stringLiterals: StringLiteralEntry[] }> {
+export async function fetchStringLiterals(sessionId: string, offset: number, limit: number): Promise<{ total: number; offset: number; limit: number; strings: StringLiteralEntry[] }> {
   return request(`/api/string-literals/${sessionId}?offset=${offset}&limit=${limit}`);
 }
 
 export async function searchStrings(sessionId: string, query: string, offset: number, limit: number, useRegex: boolean): Promise<{ total: number; offset: number; limit: number; strings: StringEntry[] }> {
   const params = new URLSearchParams({ q: query, offset: String(offset), limit: String(limit), use_regex: String(useRegex) });
   return request(`/api/search/${sessionId}?${params}`);
+}
+
+export async function searchLiterals(sessionId: string, query: string, offset: number, limit: number, useRegex: boolean): Promise<{ total: number; offset: number; limit: number; strings: StringLiteralEntry[] }> {
+  const params = new URLSearchParams({ q: query, offset: String(offset), limit: String(limit), use_regex: String(useRegex) });
+  return request(`/api/search-literals/${sessionId}?${params}`);
 }
 
 export async function getSession(sessionId: string): Promise<MetadataFileInfo> {

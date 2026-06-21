@@ -99,6 +99,8 @@ def _parse_string_literals(data: bytes, header: MetadataHeader) -> list[StringLi
         if length < 0:
             continue
 
+        offset_val = data_index_or_value
+
         if length <= 4095:
             raw = struct.pack("<i", data_index_or_value)[:length]
             value = raw.decode("utf-8", errors="replace")
@@ -110,6 +112,6 @@ def _parse_string_literals(data: bytes, header: MetadataHeader) -> list[StringLi
             else:
                 value = data[str_data_offset:end].decode("utf-8", errors="replace")
 
-        literals.append(StringLiteralEntry(index=i, value=value))
+        literals.append(StringLiteralEntry(index=i, value=value, offset=offset_val, length=length))
 
     return literals

@@ -67,6 +67,8 @@ class StringEntry(BaseModel):
 class StringLiteralEntry(BaseModel):
     index: int
     value: str
+    offset: int = 0
+    length: int = 0
 
 
 class MetadataFileInfo(BaseModel):

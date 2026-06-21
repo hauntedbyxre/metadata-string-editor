@@ -54,6 +54,7 @@ async def upload_metadata(file: UploadFile = File(...)):
         "string_data_base": parsed.header.stringOffset,
         "header": parsed.header,
         "edits": {},
+        "literal_edits": {},
         "history": [],
         "created_at": time.time(),
     }
@@ -102,9 +103,16 @@ async def edit_string(session_id: str, request: EditRequest):
     if not session:
         raise HTTPException(404, "Session not found")
 
-    old_value = session["parsed"].strings[request.index].value
-    session["parsed"].strings[request.index].value = request.newValue
-    session["edits"][request.index] = request.newValue
+    if request.target == "stringLiterals":
+        target_list = session["parsed"].stringLiterals
+        edit_map = session["literal_edits"]
+    else:
+        target_list = session["parsed"].strings
+        edit_map = session["edits"]
+
+    old_value = target_list[request.index].value
+    target_list[request.index].value = request.newValue
+    edit_map[request.index] = request.newValue
 
     action = EditAction(
         type="edit",
@@ -160,10 +168,18 @@ async def undo(session_id: str):
 
     action = session["history"].pop()
     idx = action.index
-    session["parsed"].strings[idx].value = action.oldValue
 
-    if action.index in session["edits"]:
-        del session["edits"][action.index]
+    if action.target == "stringLiterals":
+        target_list = session["parsed"].stringLiterals
+        edit_map = session["literal_edits"]
+    else:
+        target_list = session["parsed"].strings
+        edit_map = session["edits"]
+
+    target_list[idx].value = action.oldValue
+
+    if idx in edit_map:
+        del edit_map[idx]
 
     return {"undone": action}
 
@@ -188,8 +204,12 @@ async def import_project(session_id: str, project: EditProject):
 
     for edit in project.edits:
         idx = edit.index
-        session["parsed"].strings[idx].value = edit.newValue
-        session["edits"][idx] = edit.newValue
+        if edit.target == "stringLiterals":
+            session["parsed"].stringLiterals[idx].value = edit.newValue
+            session["literal_edits"][idx] = edit.newValue
+        else:
+            session["parsed"].strings[idx].value = edit.newValue
+            session["edits"][idx] = edit.newValue
         session["history"].append(edit)
 
     return {"applied": len(project.edits)}
@@ -251,7 +271,37 @@ async def get_string_literals(session_id: str, offset: int = 0, limit: int = 200
         "total": len(literals),
         "offset": offset,
         "limit": limit,
-        "stringLiterals": [s.model_dump() for s in chunk],
+        "strings": [s.model_dump() for s in chunk],
+    }
+
+
+@router.get("/search-literals/{session_id}")
+async def search_string_literals(session_id: str, q: str = "", offset: int = 0, limit: int = 200, use_regex: bool = False):
+    session = _sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    literals = session["parsed"].stringLiterals
+    if not q:
+        chunk = literals[offset:offset + limit]
+        total = len(literals)
+    else:
+        import re as re_mod
+        try:
+            if use_regex:
+                pattern = re_mod.compile(q, re_mod.IGNORECASE)
+                matches = [s for s in literals if pattern.search(s.value)]
+            else:
+                ql = q.lower()
+                matches = [s for s in literals if ql in s.value.lower()]
+        except re_mod.error:
+            raise HTTPException(400, "Invalid regex pattern")
+        total = len(matches)
+        chunk = matches[offset:offset + limit]
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "strings": [s.model_dump() for s in chunk],
     }
 
 
@@ -261,20 +311,25 @@ async def download(session_id: str, request: Request = None):
     if not session:
         raise HTTPException(404, "Session not found")
 
-    original_strings = [s.value for s in session["parsed"].strings]
+    data = session["original_data"]
+    header = session["header"]
+    has_string_edits = bool(session["edits"])
+    has_literal_edits = bool(session["literal_edits"])
 
-    if not session["edits"]:
-        return Response(content=session["original_data"], media_type="application/octet-stream",
+    if not has_string_edits and not has_literal_edits:
+        return Response(content=data, media_type="application/octet-stream",
                         headers={"Content-Disposition": f'attachment; filename="{session["parsed"].fileName}"'})
 
-    rebuilt = rebuild_metadata(
-        session["original_data"],
-        original_strings,
-        session["edits"],
-    )
+    if has_string_edits:
+        original_strings = [s.value for s in session["parsed"].strings]
+        data = rebuild_metadata(data, original_strings, session["edits"], header)
+
+    if has_literal_edits:
+        from ..services.builder import rebuild_string_literals
+        data = rebuild_string_literals(data, session["parsed"].stringLiterals, session["literal_edits"], header)
 
     return Response(
-        content=rebuilt,
+        content=data,
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{session["parsed"].fileName}"'},
     )

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
-import type { MetadataFileInfo, EditAction, StringEntry } from '../utils/types';
-import { uploadMetadata, fetchStrings, searchStrings, getSession, editString, bulkReplace, undoEdit, exportProject, importProject, getDownloadUrl } from '../utils/api';
+import type { MetadataFileInfo, EditAction, StringEntry, ViewMode } from '../utils/types';
+import { uploadMetadata, fetchStrings, fetchStringLiterals, searchStrings, searchLiterals, getSession, editString, bulkReplace, undoEdit, exportProject, importProject, getDownloadUrl } from '../utils/api';
 import UploadZone from '../components/UploadZone';
 import Sidebar from '../components/Sidebar';
 import MetadataInfo from '../components/MetadataInfo';
@@ -21,6 +21,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>('editor');
+  const [viewMode, setViewMode] = useState<ViewMode>('literals');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'text' | 'regex'>('text');
   const [history, setHistory] = useState<EditAction[]>([]);
@@ -28,7 +29,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
   const [notification, setNotification] = useState<string | null>(null);
   const notifTimeout = useRef<ReturnType<typeof setTimeout>>();
 
-  const [displayedStrings, setDisplayedStrings] = useState<StringEntry[]>([]);
+  const [displayedStrings, setDisplayedStrings] = useState<(StringEntry | import('../utils/types').StringLiteralEntry)[]>([]);
   const [totalFiltered, setTotalFiltered] = useState(0);
   const [stringsOffset, setStringsOffset] = useState(0);
   const [stringsLoading, setStringsLoading] = useState(false);
@@ -40,19 +41,31 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     notifTimeout.current = setTimeout(() => setNotification(null), 3000);
   }, []);
 
-  async function loadStrings(sid: string, query: string, regex: boolean, offset: number, append: boolean) {
+  const targetName = useCallback(() => viewMode === 'literals' ? 'stringLiterals' : 'strings', [viewMode]);
+
+  async function loadStrings(sid: string, query: string, regex: boolean, offset: number, append: boolean, mode?: ViewMode) {
     if (stringsLoading) return;
+    const useMode = mode ?? viewMode;
     setStringsLoading(true);
     try {
-      const result = query
-        ? await searchStrings(sid, query, offset, PAGE_SIZE, regex)
-        : await fetchStrings(sid, offset, PAGE_SIZE);
-      setDisplayedStrings(prev => append ? [...prev, ...result.strings] : result.strings);
+      const isLiterals = useMode === 'literals';
+      let result: any;
+      if (query) {
+        result = isLiterals
+          ? await searchLiterals(sid, query, offset, PAGE_SIZE, regex)
+          : await searchStrings(sid, query, offset, PAGE_SIZE, regex);
+      } else {
+        result = isLiterals
+          ? await fetchStringLiterals(sid, offset, PAGE_SIZE)
+          : await fetchStrings(sid, offset, PAGE_SIZE);
+      }
+      const items = result.strings || [];
+      setDisplayedStrings(prev => append ? [...prev, ...items] : items);
       setTotalFiltered(result.total);
-      setStringsOffset(offset + result.strings.length);
-      stringsEndRef.current = result.strings.length < PAGE_SIZE;
-    } catch {
-      // ignore
+      setStringsOffset(offset + items.length);
+      stringsEndRef.current = items.length < PAGE_SIZE;
+    } catch (e: any) {
+      showNotification(`Error: ${e.message || 'failed to load strings'}`);
     } finally {
       setStringsLoading(false);
     }
@@ -63,17 +76,19 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     setError(null);
     try {
       const { meta, sessionId } = await uploadMetadata(f);
+      showNotification(`Upload OK, session=${sessionId.slice(0,8)}..., literals=${meta.stringLiteralCount}, strings=${meta.stringCount}`);
       setFile(f);
       setSessionId(sessionId);
       setMetadata({ ...meta, strings: [], stringLiterals: [] });
       setHistory([]);
       setSearchQuery('');
+      setViewMode('literals');
       setActiveStringIndex(null);
       setDisplayedStrings([]);
       setTotalFiltered(0);
       setStringsOffset(0);
       stringsEndRef.current = false;
-      loadStrings(sessionId, '', false, 0, false);
+      loadStrings(sessionId, '', false, 0, false, 'literals');
     } catch (e: any) {
       setError(e.message || 'Upload failed');
     } finally {
@@ -88,36 +103,38 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     setDisplayedStrings([]);
     setStringsOffset(0);
     stringsEndRef.current = false;
-    loadStrings(sessionId, query, mode === 'regex', 0, false);
-  }, [sessionId]);
+    loadStrings(sessionId, query, mode === 'regex', 0, false, viewMode);
+  }, [sessionId, viewMode]);
 
   const handleLoadMore = useCallback(() => {
     if (!sessionId || stringsEndRef.current || stringsLoading) return;
-    loadStrings(sessionId, searchQuery, searchMode === 'regex', stringsOffset, true);
-  }, [sessionId, searchQuery, searchMode, stringsOffset, stringsLoading]);
+    loadStrings(sessionId, searchQuery, searchMode === 'regex', stringsOffset, true, viewMode);
+  }, [sessionId, searchQuery, searchMode, stringsOffset, stringsLoading, viewMode]);
 
   const handleEditString = useCallback(async (index: number, newValue: string) => {
     if (!sessionId || !metadata) return;
     try {
-      const action = await editString(sessionId, { target: 'strings', index, newValue });
+      const target = viewMode === 'literals' ? 'stringLiterals' : 'strings';
+      const action = await editString(sessionId, { target, index, newValue });
       setDisplayedStrings(prev => prev.map(s => s.index === index ? { ...s, value: newValue } : s));
       setHistory(prev => [...prev, action]);
-      showNotification(`String #${index} updated`);
+      showNotification(`${target === 'stringLiterals' ? 'Literal' : 'String'} #${index} updated`);
     } catch (e: any) {
       setError(e.message);
     }
-  }, [sessionId, metadata, showNotification]);
+  }, [sessionId, metadata, showNotification, viewMode]);
 
   const handleBulkReplace = useCallback(async (find: string, replace: string, useRegex: boolean) => {
     if (!sessionId || !metadata) return;
     try {
-      const result = await bulkReplace(sessionId, { find, replace, useRegex, target: 'strings' });
-      showNotification(`${result.actions.length} strings replaced`);
+      const target = viewMode === 'literals' ? 'stringLiterals' : 'strings';
+      const result = await bulkReplace(sessionId, { find, replace, useRegex, target });
+      showNotification(`${result.actions.length} ${target} replaced`);
       setHistory(prev => [...prev, ...result.actions]);
     } catch (e: any) {
       setError(e.message);
     }
-  }, [sessionId, metadata, showNotification]);
+  }, [sessionId, metadata, showNotification, viewMode]);
 
   const handleUndo = useCallback(async () => {
     if (!sessionId) return;
@@ -191,14 +208,40 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
         canUndo={history.length > 0}
         onExport={handleExport}
         onImport={handleImport}
-        onNew={() => { setMetadata(null); setSessionId(null); setFile(null); setHistory([]); setDisplayedStrings([]); }}
+        onNew={() => { setMetadata(null); setSessionId(null); setFile(null); setHistory([]); setDisplayedStrings([]); setViewMode('literals'); }}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-12 border-b border-[var(--border)] flex items-center px-4 gap-3 bg-[var(--bg-secondary)]">
           <span className="text-sm font-medium text-[var(--text-primary)] truncate">
-            {file?.name} — {metadata.stringCount} strings
+            {file?.name}
           </span>
+          <div className="flex items-center gap-1 text-xs border border-[var(--border)] rounded overflow-hidden">
+            <button
+              onClick={() => {
+                setViewMode('literals');
+                setDisplayedStrings([]);
+                setStringsOffset(0);
+                stringsEndRef.current = false;
+                if (sessionId) loadStrings(sessionId, '', false, 0, false, 'literals');
+              }}
+              className={`px-2 py-1 ${viewMode === 'literals' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+            >
+              Literals ({metadata.stringLiteralCount})
+            </button>
+            <button
+              onClick={() => {
+                setViewMode('strings');
+                setDisplayedStrings([]);
+                setStringsOffset(0);
+                stringsEndRef.current = false;
+                if (sessionId) loadStrings(sessionId, '', false, 0, false, 'strings');
+              }}
+              className={`px-2 py-1 ${viewMode === 'strings' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+            >
+              Strings ({metadata.stringCount})
+            </button>
+          </div>
           <div className="ml-auto flex items-center gap-2">
             {history.length > 0 && (
               <a
