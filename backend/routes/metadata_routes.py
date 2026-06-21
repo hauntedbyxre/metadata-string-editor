@@ -20,9 +20,9 @@ _sessions: dict[str, dict] = {}
 @router.post("/upload", response_model=MetadataFileInfo)
 async def upload_metadata(file: UploadFile = File(...)):
     data = await file.read()
-    parsed = parse_metadata(data, file.filename or "global-metadata.dat")
-    if parsed is None:
-        raise HTTPException(400, "Invalid or unsupported global-metadata.dat file")
+    parsed, err = parse_metadata(data, file.filename or "global-metadata.dat")
+    if err or parsed is None:
+        raise HTTPException(400, err or "Invalid or unsupported global-metadata.dat file")
 
     session_id = str(uuid.uuid4())
     string_offsets = _extract_string_offsets(data, parsed.header)

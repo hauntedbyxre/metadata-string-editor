@@ -5,7 +5,7 @@ from ..models.metadata import (
     MetadataHeader, StringEntry, StringLiteralEntry, MetadataFileInfo,
 )
 
-EXPECTED_SANITY = 0xFAB11BAF
+VALID_SANITIES = {0xFAB11BAF, 0xFAB11BAE}
 
 HEADER_FIELD_NAMES = [
     "sanity", "version",
@@ -40,23 +40,20 @@ def _read_int32(data: bytes, offset: int) -> int:
     return struct.unpack_from("<i", data, offset)[0]
 
 
-def _parse_header(data: bytes) -> MetadataHeader | None:
+def parse_metadata(data: bytes, file_name: str = "global-metadata.dat") -> tuple[MetadataFileInfo | None, str | None]:
     if len(data) < 8:
-        return None
+        return None, "File too small"
+
     sanity = _read_int32(data, 0)
-    if sanity != EXPECTED_SANITY:
-        return None
+    if sanity not in VALID_SANITIES:
+        return None, f"Unknown magic: 0x{sanity:08X} (expected 0xFAB11BAF or 0xFAB11BAE). This is not a valid Unity IL2CPP global-metadata.dat file."
+
+    version = _read_int32(data, 4)
     num_fields = min(len(data) // 4, len(HEADER_FIELD_NAMES))
     values = [0] * len(HEADER_FIELD_NAMES)
     for i in range(num_fields):
         values[i] = _read_int32(data, i * 4)
-    return MetadataHeader(**dict(zip(HEADER_FIELD_NAMES, values)))
-
-
-def parse_metadata(data: bytes, file_name: str = "global-metadata.dat") -> MetadataFileInfo | None:
-    header = _parse_header(data)
-    if header is None:
-        return None
+    header = MetadataHeader(**dict(zip(HEADER_FIELD_NAMES, values)))
 
     strings = _parse_string_table(data, header)
     string_literals = _parse_string_literals(data, header)
@@ -67,18 +64,7 @@ def parse_metadata(data: bytes, file_name: str = "global-metadata.dat") -> Metad
         header=header,
         strings=strings,
         stringLiterals=string_literals,
-    )
-
-    strings = _parse_string_table(data, header)
-    string_literals = _parse_string_literals(data, header)
-
-    return MetadataFileInfo(
-        fileName=file_name,
-        fileSize=len(data),
-        header=header,
-        strings=strings,
-        stringLiterals=string_literals,
-    )
+    ), None
 
 
 def _parse_string_table(data: bytes, header: MetadataHeader) -> list[StringEntry]:
