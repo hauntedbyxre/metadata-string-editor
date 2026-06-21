@@ -107,29 +107,22 @@ def rebuild_string_literals(data: bytes, literals: list, literal_edits: dict[int
     old_data_offset = hdr.stringLiteralDataOffset
     old_data_size = hdr.stringLiteralDataSize
 
-    if aligned <= old_data_size:
-        new_data_offset = old_data_offset
-        delta_offset = 0
-    elif old_data_offset + old_data_size >= len(data):
-        new_data_offset = old_data_offset
-        delta_offset = 0
-    else:
-        new_data_offset = len(data)
-        delta_offset = (new_data_offset + aligned) - (old_data_offset + old_data_size)
-
     list_byte_size = hdr.stringLiteralCount * 8
     result[hdr.stringLiteralOffset:hdr.stringLiteralOffset + list_byte_size] = bytes(new_literal_list)
 
-    if new_data_offset == old_data_offset:
-        end_pos = new_data_offset + len(new_raw_data)
-        if end_pos > len(result):
-            result.extend(b"\x00" * (end_pos - len(result)))
-        result[new_data_offset:new_data_offset + len(new_raw_data)] = bytes(new_raw_data)
+    if aligned <= old_data_size:
+        data_end = old_data_offset + len(new_raw_data)
+        if data_end > len(result):
+            result.extend(b"\x00" * (data_end - len(result)))
+        result[old_data_offset:old_data_offset + len(new_raw_data)] = bytes(new_raw_data)
+        new_data_offset = old_data_offset
+        delta_offset = 0
     else:
-        old_end = old_data_offset + old_data_size
-        before = result[:new_data_offset]
-        after = result[old_end:]
-        result = bytearray(before + bytes(new_raw_data) + after)
+        before = result[:old_data_offset]
+        after_rest = result[old_data_offset + old_data_size:]
+        new_data_offset = len(before) + len(after_rest)
+        result = bytearray(before + after_rest + bytes(new_raw_data))
+        delta_offset = (new_data_offset + aligned) - (old_data_offset + old_data_size)
 
     struct.pack_into("<I", result, 4 * 4, new_data_offset)
     struct.pack_into("<I", result, 5 * 4, aligned)
