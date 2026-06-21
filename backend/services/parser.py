@@ -40,7 +40,7 @@ def _read_int32(data: bytes, offset: int) -> int:
     return struct.unpack_from("<i", data, offset)[0]
 
 
-def parse_metadata(data: bytes, file_name: str = "global-metadata.dat") -> tuple[MetadataFileInfo | None, str | None]:
+def parse_metadata(data: bytes, file_name: str = "global-metadata.dat", skip_strings: bool = False) -> tuple[MetadataFileInfo | None, str | None]:
     if len(data) < 8:
         return None, "File too small"
 
@@ -56,7 +56,11 @@ def parse_metadata(data: bytes, file_name: str = "global-metadata.dat") -> tuple
         values[i] = _read_int32(data, i * 4)
     header = MetadataHeader(**dict(zip(HEADER_FIELD_NAMES, values)))
 
-    strings = _parse_string_table(data, header)
+    if skip_strings:
+        strings = []
+    else:
+        strings = _parse_string_table(data, header)
+
     string_literals = _parse_string_literals(data, header)
 
     return MetadataFileInfo(
@@ -66,6 +70,16 @@ def parse_metadata(data: bytes, file_name: str = "global-metadata.dat") -> tuple
         strings=strings,
         stringLiterals=string_literals,
     ), None
+
+
+def read_string_entry(data: bytes, header, index: int) -> str:
+    string_data_base = header.stringOffset
+    str_offset = _read_int32(data, string_data_base + index * 4)
+    abs_str_offset = string_data_base + str_offset
+    end = data.find(b"\x00", abs_str_offset)
+    if end == -1:
+        return data[abs_str_offset:].decode("utf-8", errors="replace")
+    return data[abs_str_offset:end].decode("utf-8", errors="replace")
 
 
 def _parse_string_table(data: bytes, header: MetadataHeader) -> list[StringEntry]:
