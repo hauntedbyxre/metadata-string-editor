@@ -6,7 +6,15 @@ const BACKEND = 'http://216.128.158.141';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const path = Array.isArray(req.query.path) ? req.query.path.join('/') : req.query.path || '';
-  const url = `${BACKEND}/api/${path}`;
+  // reconstruct query string from req.query (excluding 'path')
+  const queryParts: string[] = [];
+  for (const [k, v] of Object.entries(req.query)) {
+    if (k === 'path' || k === 'slug' || v === undefined) continue;
+    if (Array.isArray(v)) v.forEach(val => queryParts.push(`${encodeURIComponent(k)}=${encodeURIComponent(val)}`));
+    else queryParts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+  }
+  const qs = queryParts.length > 0 ? '?' + queryParts.join('&') : '';
+  const url = `${BACKEND}/api/${path}${qs}`;
 
   const forwardHeaders = ['content-type', 'content-length', 'accept'];
   const headers: Record<string, string> = {};
