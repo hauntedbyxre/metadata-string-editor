@@ -10,7 +10,7 @@ import BulkReplace from '../components/BulkReplace';
 import ActivityLog from '../components/ActivityLog';
 import ThemeToggle from '../components/ThemeToggle';
 
-const PAGE_SIZE = 200;
+const PAGE_SIZE = 500;
 
 type View = 'editor' | 'info' | 'bulk' | 'history';
 
@@ -34,6 +34,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
   const [stringsOffset, setStringsOffset] = useState(0);
   const [stringsLoading, setStringsLoading] = useState(false);
   const stringsEndRef = useRef(false);
+  const loadGenRef = useRef(0);
 
   const showNotification = useCallback((msg: string) => {
     setNotification(msg);
@@ -41,11 +42,9 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     notifTimeout.current = setTimeout(() => setNotification(null), 3000);
   }, []);
 
-  const targetName = useCallback(() => viewMode === 'literals' ? 'stringLiterals' : 'strings', [viewMode]);
-
   async function loadStrings(sid: string, query: string, regex: boolean, offset: number, append: boolean, mode?: ViewMode) {
-    if (stringsLoading) return;
     const useMode = mode ?? viewMode;
+    const gen = ++loadGenRef.current;
     setStringsLoading(true);
     try {
       const isLiterals = useMode === 'literals';
@@ -59,15 +58,17 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
           ? await fetchStringLiterals(sid, offset, PAGE_SIZE)
           : await fetchStrings(sid, offset, PAGE_SIZE);
       }
+      if (gen !== loadGenRef.current) return;
       const items = result.strings || [];
       setDisplayedStrings(prev => append ? [...prev, ...items] : items);
       setTotalFiltered(result.total);
       setStringsOffset(offset + items.length);
       stringsEndRef.current = items.length < PAGE_SIZE;
     } catch (e: any) {
+      if (gen !== loadGenRef.current) return;
       showNotification(`Error: ${e.message || 'failed to load strings'}`);
     } finally {
-      setStringsLoading(false);
+      if (gen === loadGenRef.current) setStringsLoading(false);
     }
   }
 
@@ -82,13 +83,14 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
       setMetadata({ ...meta, strings: [], stringLiterals: [] });
       setHistory([]);
       setSearchQuery('');
-      setViewMode('literals');
+      const initialMode: ViewMode = meta.stringLiteralCount > 0 ? 'literals' : 'strings';
+      setViewMode(initialMode);
       setActiveStringIndex(null);
       setDisplayedStrings([]);
       setTotalFiltered(0);
       setStringsOffset(0);
       stringsEndRef.current = false;
-      loadStrings(sessionId, '', false, 0, false, 'literals');
+      loadStrings(sessionId, '', false, 0, false, initialMode);
     } catch (e: any) {
       setError(e.message || 'Upload failed');
     } finally {
