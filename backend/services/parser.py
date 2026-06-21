@@ -44,14 +44,15 @@ def parse_metadata(data: bytes, file_name: str = "global-metadata.dat") -> tuple
     if len(data) < 8:
         return None, "File too small"
 
-    sanity = _read_int32(data, 0)
-    if sanity not in VALID_SANITIES:
-        return None, f"Unknown magic: 0x{sanity:08X} (expected 0xFAB11BAF or 0xFAB11BAE). This is not a valid Unity IL2CPP global-metadata.dat file."
+    sanity_raw = struct.unpack_from("<I", data, 0)[0]
+    if sanity_raw not in VALID_SANITIES:
+        return None, f"Unknown magic: 0x{sanity_raw:08X} (expected 0xFAB11BAF or 0xFAB11BAE). This is not a valid Unity IL2CPP global-metadata.dat file."
 
     version = _read_int32(data, 4)
     num_fields = min(len(data) // 4, len(HEADER_FIELD_NAMES))
     values = [0] * len(HEADER_FIELD_NAMES)
-    for i in range(num_fields):
+    values[0] = sanity_raw
+    for i in range(1, num_fields):
         values[i] = _read_int32(data, i * 4)
     header = MetadataHeader(**dict(zip(HEADER_FIELD_NAMES, values)))
 
