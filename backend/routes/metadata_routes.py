@@ -17,7 +17,7 @@ router = APIRouter()
 _sessions: dict[str, dict] = {}
 
 
-@router.post("/upload", response_model=MetadataFileInfo)
+@router.post("/upload")
 async def upload_metadata(file: UploadFile = File(...)):
     data = await file.read()
     parsed, err = parse_metadata(data, file.filename or "global-metadata.dat")
@@ -37,8 +37,13 @@ async def upload_metadata(file: UploadFile = File(...)):
         "history": [],
     }
 
-    result = parsed.model_dump()
-    resp = JSONResponse(content=result)
+    resp = JSONResponse(content={
+        "fileName": parsed.fileName,
+        "fileSize": parsed.fileSize,
+        "header": parsed.header.model_dump(),
+        "stringCount": len(parsed.strings),
+        "stringLiteralCount": len(parsed.stringLiterals),
+    })
     resp.headers["X-Session-Id"] = session_id
     return resp
 
@@ -54,12 +59,19 @@ def _extract_string_offsets(data: bytes, header) -> list[int]:
     return offsets
 
 
-@router.get("/session/{session_id}", response_model=MetadataFileInfo)
+@router.get("/session/{session_id}")
 async def get_session(session_id: str):
     session = _sessions.get(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
-    return session["parsed"]
+    p = session["parsed"]
+    return {
+        "fileName": p.fileName,
+        "fileSize": p.fileSize,
+        "header": p.header.model_dump(),
+        "stringCount": len(p.strings),
+        "stringLiteralCount": len(p.stringLiterals),
+    }
 
 
 @router.post("/edit/{session_id}")
@@ -159,6 +171,36 @@ async def import_project(session_id: str, project: EditProject):
         session["history"].append(edit)
 
     return {"applied": len(project.edits)}
+
+
+@router.get("/strings/{session_id}")
+async def get_strings(session_id: str, offset: int = 0, limit: int = 200):
+    session = _sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    strings = session["parsed"].strings
+    chunk = strings[offset:offset + limit]
+    return {
+        "total": len(strings),
+        "offset": offset,
+        "limit": limit,
+        "strings": [s.model_dump() for s in chunk],
+    }
+
+
+@router.get("/string-literals/{session_id}")
+async def get_string_literals(session_id: str, offset: int = 0, limit: int = 200):
+    session = _sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    literals = session["parsed"].stringLiterals
+    chunk = literals[offset:offset + limit]
+    return {
+        "total": len(literals),
+        "offset": offset,
+        "limit": limit,
+        "stringLiterals": [s.model_dump() for s in chunk],
+    }
 
 
 @router.api_route("/download/{session_id}", methods=["GET", "POST"])

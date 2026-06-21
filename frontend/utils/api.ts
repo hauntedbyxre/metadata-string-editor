@@ -1,5 +1,5 @@
 import {
-  MetadataFileInfo, EditAction, EditRequest,
+  MetadataFileInfo, StringEntry, StringLiteralEntry, EditAction, EditRequest,
   BulkReplaceRequest, EditProject,
 } from './types';
 
@@ -19,14 +19,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 const UPLOAD_URL = 'https://metadata.nullbin.xyz';
 
-export async function uploadMetadata(file: File): Promise<{ metadata: MetadataFileInfo; sessionId: string }> {
+export async function uploadMetadata(file: File): Promise<{ meta: { fileName: string; fileSize: number; header: any; stringCount: number; stringLiteralCount: number }; sessionId: string }> {
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${UPLOAD_URL}/api/upload`, { method: 'POST', body: form });
   if (!res.ok) throw new Error(await res.text());
-  const metadata: MetadataFileInfo = await res.json();
+  const meta = await res.json();
   const sessionId = res.headers.get('X-Session-Id') || '';
-  return { metadata, sessionId };
+  return { meta, sessionId };
+}
+
+export async function fetchStrings(sessionId: string, offset: number, limit: number): Promise<{ total: number; offset: number; limit: number; strings: StringEntry[] }> {
+  return request(`/api/strings/${sessionId}?offset=${offset}&limit=${limit}`);
+}
+
+export async function fetchStringLiterals(sessionId: string, offset: number, limit: number): Promise<{ total: number; offset: number; limit: number; stringLiterals: StringLiteralEntry[] }> {
+  return request(`/api/string-literals/${sessionId}?offset=${offset}&limit=${limit}`);
 }
 
 export async function getSession(sessionId: string): Promise<MetadataFileInfo> {

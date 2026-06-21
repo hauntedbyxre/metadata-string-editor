@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { MetadataFileInfo, EditAction, StringEntry } from '../utils/types';
-import { uploadMetadata, getSession, editString, bulkReplace, undoEdit, exportProject, importProject, getDownloadUrl } from '../utils/api';
+import { uploadMetadata, fetchStrings, getSession, editString, bulkReplace, undoEdit, exportProject, importProject, getDownloadUrl } from '../utils/api';
 import UploadZone from '../components/UploadZone';
 import Sidebar from '../components/Sidebar';
 import MetadataInfo from '../components/MetadataInfo';
@@ -10,6 +10,8 @@ import BulkReplace from '../components/BulkReplace';
 import ActivityLog from '../components/ActivityLog';
 import ThemeToggle from '../components/ThemeToggle';
 
+const PAGE_SIZE = 500;
+
 type View = 'editor' | 'info' | 'bulk' | 'history';
 
 export default function Home({ theme, setTheme }: { theme: string; setTheme: (t: string) => void }) {
@@ -17,6 +19,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<MetadataFileInfo | null>(null);
   const [loading, setLoading] = useState(false);
+  const [stringsLoaded, setStringsLoaded] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>('editor');
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,6 +30,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
   const [editingString, setEditingString] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
   const notifTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const loadingRef = useRef(false);
 
   const showNotification = useCallback((msg: string) => {
     setNotification(msg);
@@ -38,15 +42,18 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     setLoading(true);
     setError(null);
     try {
-      const { metadata, sessionId } = await uploadMetadata(f);
+      const { meta, sessionId } = await uploadMetadata(f);
       setFile(f);
-      setMetadata(metadata);
       setSessionId(sessionId);
+      setMetadata({ ...meta, strings: [], stringLiterals: [] });
       setHistory([]);
       setSearchQuery('');
       setActiveStringIndex(null);
       setEditingString(false);
-      showNotification(`Loaded ${metadata.strings.length} strings`);
+      setStringsLoaded(0);
+      loadingRef.current = false;
+      // start loading strings in background
+      loadAllStrings(sessionId, meta.stringCount);
     } catch (e: any) {
       setError(e.message || 'Upload failed');
     } finally {
@@ -54,13 +61,32 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     }
   }, [showNotification]);
 
+  async function loadAllStrings(sessionId: string, totalCount: number) {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    const allStrings: StringEntry[] = [];
+    let offset = 0;
+    while (offset < totalCount) {
+      try {
+        const page = await fetchStrings(sessionId, offset, PAGE_SIZE);
+        allStrings.push(...page.strings);
+        offset += PAGE_SIZE;
+        setStringsLoaded(allStrings.length);
+        setMetadata(prev => prev ? { ...prev, strings: [...allStrings] } : prev);
+      } catch {
+        break;
+      }
+    }
+    loadingRef.current = false;
+  }
+
   const handleEditString = useCallback(async (index: number, newValue: string) => {
     if (!sessionId || !metadata) return;
     try {
       const action = await editString(sessionId, { target: 'strings', index, newValue });
       setMetadata(prev => {
         if (!prev) return prev;
-        const strings = [...prev.strings];
+        const strings = [...(prev.strings || [])];
         strings[index] = { ...strings[index], value: newValue };
         return { ...prev, strings };
       });
@@ -78,7 +104,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
       const result = await bulkReplace(sessionId, { find, replace, useRegex, target: 'strings' });
       setMetadata(prev => {
         if (!prev) return prev;
-        const strings = prev.strings.map(s => {
+        const strings = (prev.strings || []).map(s => {
           const action = result.actions.find(a => a.index === s.index);
           return action ? { ...s, value: action.newValue } : s;
         });
@@ -97,7 +123,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
       const result = await undoEdit(sessionId);
       setMetadata(prev => {
         if (!prev) return prev;
-        const strings = [...prev.strings];
+        const strings = [...(prev.strings || [])];
         strings[result.undone.index] = { ...strings[result.undone.index], value: result.undone.oldValue };
         return { ...prev, strings };
       });
@@ -136,8 +162,10 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
         const project = JSON.parse(text);
         const result = await importProject(sessionId, project);
         const refreshed = await getSession(sessionId);
-        setMetadata(refreshed);
-        setHistory(refreshed ? [] : []);
+        setMetadata(prev => prev ? { ...prev, ...refreshed } : prev);
+        setHistory([]);
+        setStringsLoaded(0);
+        loadAllStrings(sessionId, refreshed.stringCount);
         showNotification(`${result.applied} edits imported`);
       } catch (e: any) {
         setError(e.message);
@@ -146,7 +174,8 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     input.click();
   }, [sessionId, showNotification]);
 
-  const filteredStrings = metadata?.strings.filter(s => {
+  const curStrings = metadata?.strings || [];
+  const filteredStrings = curStrings.filter(s => {
     if (!searchQuery) return true;
     if (searchMode === 'regex') {
       try {
@@ -154,7 +183,8 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
       } catch { return false; }
     }
     return s.value.toLowerCase().includes(searchQuery.toLowerCase());
-  }) ?? [];
+  });
+  const loadingMore = metadata && stringsLoaded < metadata.stringCount;
 
   if (!metadata) {
     return (
@@ -181,13 +211,13 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
         canUndo={history.length > 0}
         onExport={handleExport}
         onImport={handleImport}
-        onNew={() => { setMetadata(null); setSessionId(null); setFile(null); setHistory([]); }}
+        onNew={() => { setMetadata(null); setSessionId(null); setFile(null); setHistory([]); setStringsLoaded(0); }}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-12 border-b border-[var(--border)] flex items-center px-4 gap-3 bg-[var(--bg-secondary)]">
           <span className="text-sm font-medium text-[var(--text-primary)] truncate">
-            {file?.name} — {metadata.strings.length} strings
+            {file?.name} — {loadingMore ? `${stringsLoaded}/${metadata.stringCount}` : metadata.stringCount} strings
           </span>
           <div className="ml-auto flex items-center gap-2">
             {history.length > 0 && (
@@ -228,9 +258,14 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
               onQueryChange={setSearchQuery}
               mode={searchMode}
               onModeChange={setSearchMode}
-              totalCount={metadata.strings.length}
+              totalCount={curStrings.length}
               filteredCount={filteredStrings.length}
             />
+            {loadingMore && (
+              <div className="px-4 py-1.5 text-xs text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border)]">
+                Loading strings... {stringsLoaded}/{metadata.stringCount}
+              </div>
+            )}
             <div className="flex-1 overflow-auto">
               <StringTable
                 strings={filteredStrings}

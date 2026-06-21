@@ -68,8 +68,10 @@ export interface MetadataFileInfo {
   fileName: string;
   fileSize: number;
   header: MetadataHeader;
-  strings: StringEntry[];
-  stringLiterals: StringLiteralEntry[];
+  stringCount: number;
+  stringLiteralCount: number;
+  strings?: StringEntry[];
+  stringLiterals?: StringLiteralEntry[];
 }
 
 export interface EditAction {
