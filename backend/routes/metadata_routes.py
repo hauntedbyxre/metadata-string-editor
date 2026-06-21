@@ -59,6 +59,7 @@ async def upload_metadata(file: UploadFile = File(...)):
     }
 
     resp = JSONResponse(content={
+        "sessionId": session_id,
         "fileName": parsed.fileName,
         "fileSize": parsed.fileSize,
         "header": parsed.header.model_dump(),

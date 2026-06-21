@@ -19,14 +19,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 const UPLOAD_URL = 'https://metadata.nullbin.xyz';
 
-export async function uploadMetadata(file: File): Promise<{ meta: { fileName: string; fileSize: number; header: any; stringCount: number; stringLiteralCount: number }; sessionId: string }> {
+export async function uploadMetadata(file: File): Promise<{ meta: { sessionId: string; fileName: string; fileSize: number; header: any; stringCount: number; stringLiteralCount: number }; sessionId: string }> {
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${UPLOAD_URL}/api/upload`, { method: 'POST', body: form });
   if (!res.ok) throw new Error(await res.text());
   const meta = await res.json();
-  const sessionId = res.headers.get('X-Session-Id') || '';
-  return { meta, sessionId };
+  return { meta, sessionId: meta.sessionId };
 }
 
 export async function fetchStrings(sessionId: string, offset: number, limit: number): Promise<{ total: number; offset: number; limit: number; strings: StringEntry[] }> {
