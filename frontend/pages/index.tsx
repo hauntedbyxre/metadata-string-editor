@@ -37,17 +37,6 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
   const handleUpload = useCallback(async (f: File) => {
     setLoading(true);
     setError(null);
-
-    if (f.size > 4 * 1024 * 1024) {
-      setError(
-        `File is ${(f.size / 1024 / 1024).toFixed(1)} MB — Vercel's free tier limits uploads to 4.5 MB. ` +
-        `Upload directly at http://216.128.158.141/ (no size limits). ` +
-        `After uploading, copy the session ID from the VPS site and add ?session=ID to this URL to continue editing.`
-      );
-      setLoading(false);
-      return;
-    }
-
     try {
       const { metadata, sessionId } = await uploadMetadata(f);
       setFile(f);
@@ -59,14 +48,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
       setEditingString(false);
       showNotification(`Loaded ${metadata.strings.length} strings`);
     } catch (e: any) {
-      if (e.message?.includes('FUNCTION_PAYLOAD_TOO_LARGE') || e.message?.includes('413')) {
-        setError(
-          'File too large for Vercel free tier (limit: 4.5 MB). ' +
-          'Use http://216.128.158.141/ to upload this file.'
-        );
-      } else {
-        setError(e.message || 'Upload failed');
-      }
+      setError(e.message || 'Upload failed');
     } finally {
       setLoading(false);
     }

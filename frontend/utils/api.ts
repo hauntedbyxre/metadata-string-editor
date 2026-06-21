@@ -17,10 +17,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+const UPLOAD_URL = 'https://metadata.nullbin.xyz';
+
 export async function uploadMetadata(file: File): Promise<{ metadata: MetadataFileInfo; sessionId: string }> {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: form });
+  const res = await fetch(`${UPLOAD_URL}/api/upload`, { method: 'POST', body: form });
   if (!res.ok) throw new Error(await res.text());
   const metadata: MetadataFileInfo = await res.json();
   const sessionId = res.headers.get('X-Session-Id') || '';
@@ -65,5 +67,5 @@ export async function importProject(sessionId: string, project: EditProject): Pr
 }
 
 export function getDownloadUrl(sessionId: string): string {
-  return `${API_BASE}/api/download/${sessionId}`;
+  return `${UPLOAD_URL}/api/download/${sessionId}`;
 }
