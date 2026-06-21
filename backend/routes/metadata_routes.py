@@ -58,8 +58,11 @@ def _read_string_chunk(data: bytes, header, offset: int, limit: int, edits: dict
 @router.post("/upload")
 async def upload_metadata(file: UploadFile = File(...)):
     data = await file.read()
+    import logging
+    logging.info(f"Upload received: file='{file.filename}' size={len(data)} sanity=0x{struct.unpack_from('<I', data, 0)[0]:08X}")
     parsed, err = parse_metadata(data, file.filename or "global-metadata.dat", skip_strings=True)
     if err or parsed is None:
+        logging.warning(f"Upload rejected: {err}")
         raise HTTPException(400, err or "Invalid or unsupported global-metadata.dat file")
 
     if len(_sessions) >= _MAX_SESSIONS:
