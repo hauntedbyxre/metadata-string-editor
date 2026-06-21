@@ -37,6 +37,11 @@ export async function fetchStringLiterals(sessionId: string, offset: number, lim
   return request(`/api/string-literals/${sessionId}?offset=${offset}&limit=${limit}`);
 }
 
+export async function searchStrings(sessionId: string, query: string, offset: number, limit: number, useRegex: boolean): Promise<{ total: number; offset: number; limit: number; strings: StringEntry[] }> {
+  const params = new URLSearchParams({ q: query, offset: String(offset), limit: String(limit), use_regex: String(useRegex) });
+  return request(`/api/search/${sessionId}?${params}`);
+}
+
 export async function getSession(sessionId: string): Promise<MetadataFileInfo> {
   return request(`/api/session/${sessionId}`);
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import uuid
 import time
+import threading
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from fastapi.responses import Response, JSONResponse
 
@@ -15,6 +16,20 @@ from ..services.builder import rebuild_metadata
 router = APIRouter()
 
 _sessions: dict[str, dict] = {}
+_MAX_SESSIONS = 10
+_SESSION_TTL = 1800  # 30 minutes
+
+# periodic cleanup
+def _cleanup_sessions():
+    while True:
+        time.sleep(300)
+        now = time.time()
+        stale = [sid for sid, s in list(_sessions.items()) if now - s.get("created_at", 0) > _SESSION_TTL]
+        for sid in stale:
+            del _sessions[sid]
+
+t = threading.Thread(target=_cleanup_sessions, daemon=True)
+t.start()
 
 
 @router.post("/upload")
@@ -23,6 +38,11 @@ async def upload_metadata(file: UploadFile = File(...)):
     parsed, err = parse_metadata(data, file.filename or "global-metadata.dat")
     if err or parsed is None:
         raise HTTPException(400, err or "Invalid or unsupported global-metadata.dat file")
+
+    if len(_sessions) >= _MAX_SESSIONS:
+        # evict oldest session
+        oldest = min(_sessions, key=lambda sid: _sessions[sid].get("created_at", 0))
+        del _sessions[oldest]
 
     session_id = str(uuid.uuid4())
     string_offsets = _extract_string_offsets(data, parsed.header)
@@ -35,6 +55,7 @@ async def upload_metadata(file: UploadFile = File(...)):
         "header": parsed.header,
         "edits": {},
         "history": [],
+        "created_at": time.time(),
     }
 
     resp = JSONResponse(content={
@@ -182,6 +203,36 @@ async def get_strings(session_id: str, offset: int = 0, limit: int = 200):
     chunk = strings[offset:offset + limit]
     return {
         "total": len(strings),
+        "offset": offset,
+        "limit": limit,
+        "strings": [s.model_dump() for s in chunk],
+    }
+
+
+@router.get("/search/{session_id}")
+async def search_strings(session_id: str, q: str = "", offset: int = 0, limit: int = 200, use_regex: bool = False):
+    session = _sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    strings = session["parsed"].strings
+    if not q:
+        chunk = strings[offset:offset + limit]
+        total = len(strings)
+    else:
+        import re as re_mod
+        try:
+            if use_regex:
+                pattern = re_mod.compile(q, re_mod.IGNORECASE)
+                matches = [s for s in strings if pattern.search(s.value)]
+            else:
+                ql = q.lower()
+                matches = [s for s in strings if ql in s.value.lower()]
+        except re_mod.error:
+            raise HTTPException(400, "Invalid regex pattern")
+        total = len(matches)
+        chunk = matches[offset:offset + limit]
+    return {
+        "total": total,
         "offset": offset,
         "limit": limit,
         "strings": [s.model_dump() for s in chunk],

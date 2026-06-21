@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { MetadataFileInfo, EditAction, StringEntry } from '../utils/types';
-import { uploadMetadata, fetchStrings, getSession, editString, bulkReplace, undoEdit, exportProject, importProject, getDownloadUrl } from '../utils/api';
+import { uploadMetadata, fetchStrings, searchStrings, getSession, editString, bulkReplace, undoEdit, exportProject, importProject, getDownloadUrl } from '../utils/api';
 import UploadZone from '../components/UploadZone';
 import Sidebar from '../components/Sidebar';
 import MetadataInfo from '../components/MetadataInfo';
@@ -10,7 +10,7 @@ import BulkReplace from '../components/BulkReplace';
 import ActivityLog from '../components/ActivityLog';
 import ThemeToggle from '../components/ThemeToggle';
 
-const PAGE_SIZE = 500;
+const PAGE_SIZE = 200;
 
 type View = 'editor' | 'info' | 'bulk' | 'history';
 
@@ -19,24 +19,44 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<MetadataFileInfo | null>(null);
   const [loading, setLoading] = useState(false);
-  const [stringsLoaded, setStringsLoaded] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>('editor');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'text' | 'regex'>('text');
   const [history, setHistory] = useState<EditAction[]>([]);
   const [activeStringIndex, setActiveStringIndex] = useState<number | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [editingString, setEditingString] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
   const notifTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const loadingRef = useRef(false);
+
+  const [displayedStrings, setDisplayedStrings] = useState<StringEntry[]>([]);
+  const [totalFiltered, setTotalFiltered] = useState(0);
+  const [stringsOffset, setStringsOffset] = useState(0);
+  const [stringsLoading, setStringsLoading] = useState(false);
+  const stringsEndRef = useRef(false);
 
   const showNotification = useCallback((msg: string) => {
     setNotification(msg);
     if (notifTimeout.current) clearTimeout(notifTimeout.current);
     notifTimeout.current = setTimeout(() => setNotification(null), 3000);
   }, []);
+
+  async function loadStrings(sid: string, query: string, regex: boolean, offset: number, append: boolean) {
+    if (stringsLoading) return;
+    setStringsLoading(true);
+    try {
+      const result = query
+        ? await searchStrings(sid, query, offset, PAGE_SIZE, regex)
+        : await fetchStrings(sid, offset, PAGE_SIZE);
+      setDisplayedStrings(prev => append ? [...prev, ...result.strings] : result.strings);
+      setTotalFiltered(result.total);
+      setStringsOffset(offset + result.strings.length);
+      stringsEndRef.current = result.strings.length < PAGE_SIZE;
+    } catch {
+      // ignore
+    } finally {
+      setStringsLoading(false);
+    }
+  }
 
   const handleUpload = useCallback(async (f: File) => {
     setLoading(true);
@@ -49,11 +69,11 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
       setHistory([]);
       setSearchQuery('');
       setActiveStringIndex(null);
-      setEditingString(false);
-      setStringsLoaded(0);
-      loadingRef.current = false;
-      // start loading strings in background
-      loadAllStrings(sessionId, meta.stringCount);
+      setDisplayedStrings([]);
+      setTotalFiltered(0);
+      setStringsOffset(0);
+      stringsEndRef.current = false;
+      loadStrings(sessionId, '', false, 0, false);
     } catch (e: any) {
       setError(e.message || 'Upload failed');
     } finally {
@@ -61,37 +81,27 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     }
   }, [showNotification]);
 
-  async function loadAllStrings(sessionId: string, totalCount: number) {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
-    const allStrings: StringEntry[] = [];
-    let offset = 0;
-    while (offset < totalCount) {
-      try {
-        const page = await fetchStrings(sessionId, offset, PAGE_SIZE);
-        allStrings.push(...page.strings);
-        offset += PAGE_SIZE;
-        setStringsLoaded(allStrings.length);
-        setMetadata(prev => prev ? { ...prev, strings: [...allStrings] } : prev);
-      } catch {
-        break;
-      }
-    }
-    loadingRef.current = false;
-  }
+  const handleSearch = useCallback((query: string, mode: 'text' | 'regex') => {
+    setSearchQuery(query);
+    setSearchMode(mode);
+    if (!sessionId) return;
+    setDisplayedStrings([]);
+    setStringsOffset(0);
+    stringsEndRef.current = false;
+    loadStrings(sessionId, query, mode === 'regex', 0, false);
+  }, [sessionId]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!sessionId || stringsEndRef.current || stringsLoading) return;
+    loadStrings(sessionId, searchQuery, searchMode === 'regex', stringsOffset, true);
+  }, [sessionId, searchQuery, searchMode, stringsOffset, stringsLoading]);
 
   const handleEditString = useCallback(async (index: number, newValue: string) => {
     if (!sessionId || !metadata) return;
     try {
       const action = await editString(sessionId, { target: 'strings', index, newValue });
-      setMetadata(prev => {
-        if (!prev) return prev;
-        const strings = [...(prev.strings || [])];
-        strings[index] = { ...strings[index], value: newValue };
-        return { ...prev, strings };
-      });
+      setDisplayedStrings(prev => prev.map(s => s.index === index ? { ...s, value: newValue } : s));
       setHistory(prev => [...prev, action]);
-      setEditingString(false);
       showNotification(`String #${index} updated`);
     } catch (e: any) {
       setError(e.message);
@@ -102,16 +112,8 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     if (!sessionId || !metadata) return;
     try {
       const result = await bulkReplace(sessionId, { find, replace, useRegex, target: 'strings' });
-      setMetadata(prev => {
-        if (!prev) return prev;
-        const strings = (prev.strings || []).map(s => {
-          const action = result.actions.find(a => a.index === s.index);
-          return action ? { ...s, value: action.newValue } : s;
-        });
-        return { ...prev, strings };
-      });
-      setHistory(prev => [...prev, ...result.actions]);
       showNotification(`${result.actions.length} strings replaced`);
+      setHistory(prev => [...prev, ...result.actions]);
     } catch (e: any) {
       setError(e.message);
     }
@@ -121,12 +123,7 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     if (!sessionId) return;
     try {
       const result = await undoEdit(sessionId);
-      setMetadata(prev => {
-        if (!prev) return prev;
-        const strings = [...(prev.strings || [])];
-        strings[result.undone.index] = { ...strings[result.undone.index], value: result.undone.oldValue };
-        return { ...prev, strings };
-      });
+      setDisplayedStrings(prev => prev.map(s => s.index === result.undone.index ? { ...s, value: result.undone.oldValue } : s));
       setHistory(prev => prev.slice(0, -1));
       showNotification('Undo successful');
     } catch (e: any) {
@@ -161,11 +158,6 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
         const text = await e.target.files[0].text();
         const project = JSON.parse(text);
         const result = await importProject(sessionId, project);
-        const refreshed = await getSession(sessionId);
-        setMetadata(prev => prev ? { ...prev, ...refreshed } : prev);
-        setHistory([]);
-        setStringsLoaded(0);
-        loadAllStrings(sessionId, refreshed.stringCount);
         showNotification(`${result.applied} edits imported`);
       } catch (e: any) {
         setError(e.message);
@@ -173,18 +165,6 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
     };
     input.click();
   }, [sessionId, showNotification]);
-
-  const curStrings = metadata?.strings || [];
-  const filteredStrings = curStrings.filter(s => {
-    if (!searchQuery) return true;
-    if (searchMode === 'regex') {
-      try {
-        return new RegExp(searchQuery).test(s.value);
-      } catch { return false; }
-    }
-    return s.value.toLowerCase().includes(searchQuery.toLowerCase());
-  });
-  const loadingMore = metadata && stringsLoaded < metadata.stringCount;
 
   if (!metadata) {
     return (
@@ -211,13 +191,13 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
         canUndo={history.length > 0}
         onExport={handleExport}
         onImport={handleImport}
-        onNew={() => { setMetadata(null); setSessionId(null); setFile(null); setHistory([]); setStringsLoaded(0); }}
+        onNew={() => { setMetadata(null); setSessionId(null); setFile(null); setHistory([]); setDisplayedStrings([]); }}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-12 border-b border-[var(--border)] flex items-center px-4 gap-3 bg-[var(--bg-secondary)]">
           <span className="text-sm font-medium text-[var(--text-primary)] truncate">
-            {file?.name} — {loadingMore ? `${stringsLoaded}/${metadata.stringCount}` : metadata.stringCount} strings
+            {file?.name} — {metadata.stringCount} strings
           </span>
           <div className="ml-auto flex items-center gap-2">
             {history.length > 0 && (
@@ -255,23 +235,21 @@ export default function Home({ theme, setTheme }: { theme: string; setTheme: (t:
           <div className="flex-1 flex flex-col min-h-0">
             <SearchBar
               query={searchQuery}
-              onQueryChange={setSearchQuery}
+              onQueryChange={q => handleSearch(q, searchMode)}
               mode={searchMode}
-              onModeChange={setSearchMode}
-              totalCount={curStrings.length}
-              filteredCount={filteredStrings.length}
+              onModeChange={m => handleSearch(searchQuery, m)}
+              totalCount={totalFiltered}
+              filteredCount={displayedStrings.length}
             />
-            {loadingMore && (
-              <div className="px-4 py-1.5 text-xs text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border)]">
-                Loading strings... {stringsLoaded}/{metadata.stringCount}
-              </div>
-            )}
             <div className="flex-1 overflow-auto">
               <StringTable
-                strings={filteredStrings}
+                strings={displayedStrings}
                 activeIndex={activeStringIndex}
                 onSelect={setActiveStringIndex}
                 onEdit={handleEditString}
+                onLoadMore={handleLoadMore}
+                hasMore={!stringsEndRef.current}
+                loading={stringsLoading}
               />
             </div>
           </div>
